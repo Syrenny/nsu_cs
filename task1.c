@@ -1,27 +1,28 @@
 #include <stdlib.h>
 #include <stdio.h>
+#define TYPE double
 #define _USE_MATH_DEFINES
 #include <math.h>
 #define N 10000000
 
-void FuncArray(double** my_array, int len)
+void FuncArray(TYPE** my_array, int len)
 {
-	double* temp = (double*)malloc(sizeof(double) * len);
+	TYPE* temp = (TYPE*)malloc(sizeof(TYPE) * len);
 	#pragma acc parallel 
 	{	
 		#pragma acc parallel loop
 		for (int i = 0; i < len; i++)
 		{
-			double k = (double)i / len;
+			TYPE k = (TYPE)i / len;
 			temp[i] = sin(k * 2.0 * M_PI);
 		}
 	}
 	*my_array = temp;
 }
 
-double SumArray(double* my_array, int len)
+TYPE SumArray(TYPE* my_array, int len)
 {
-	double res = 0;
+	TYPE res = 0;
 	#pragma acc parallel
 	{
 		#pragma acc parallel loop reduction(+:res)
@@ -34,7 +35,7 @@ double SumArray(double* my_array, int len)
 
 int main()
 {
-	double* my_array = (double*)malloc(sizeof(double));
+	TYPE* my_array = (TYPE*)malloc(sizeof(TYPE));
 	long long len = N;
 	FuncArray(&my_array, len);
 	/*for (int i = 0; i < len; i++)
