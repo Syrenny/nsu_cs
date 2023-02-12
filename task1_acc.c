@@ -8,14 +8,11 @@
 void FuncArray(TYPE** my_array, int len)
 {
 	TYPE* temp = (TYPE*)malloc(sizeof(TYPE) * len);
-	#pragma acc parallel 
-	{	
-		#pragma acc parallel loop
-		for (int i = 0; i < len; i++)
-		{
-			TYPE k = (TYPE)i / len;
-			temp[i] = sin(k * 2.0 * M_PI);
-		}
+	#pragma acc parallel loop
+	for (int i = 0; i < len; i++)
+	{
+		TYPE k = (TYPE)i / len;
+		temp[i] = sin(k * 2.0 * M_PI);
 	}
 	*my_array = temp;
 }
@@ -23,12 +20,9 @@ void FuncArray(TYPE** my_array, int len)
 TYPE SumArray(TYPE* my_array, int len)
 {
 	TYPE res = 0;
-	#pragma acc parallel
-	{
-		#pragma acc parallel loop reduction(+:res)
-		for (int i = 0; i < len; i++)
-			res += my_array[i];
-	}
+	#pragma acc parallel loop reduction(+:res)
+	for (int i = 0; i < len; i++)
+		res += my_array[i];
 	
 	return res;
 }
