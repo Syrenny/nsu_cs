@@ -1,9 +1,14 @@
 #include <stdlib.h>
 #include <stdio.h>
-#define TYPE double
+
 #ifdef FLOAT 
 #define TYPE float
+#define FUNC sinf
+#else 
+#define TYPE double
+#define FUNC sin
 #endif
+
 #define _USE_MATH_DEFINES
 #include <math.h>
 #include <omp.h>
@@ -21,7 +26,7 @@ int main()
 		for (int i = 0; i < N; i++)
 		{
 			TYPE k = (TYPE)i / N;
-			my_array[i] = sin(k * 2.0 * M_PI);
+			my_array[i] = FUNC(k * 2.0 * M_PI);
 		}
 		fill_end = omp_get_wtime();
 
@@ -30,6 +35,7 @@ int main()
 			res += my_array[i];
 		sum_end = omp_get_wtime();
 	}
+	free(my_array);
 	printf("to fill: %0.15lf\n", fill_end - start_time);
 	printf("to sum: %0.15lf\n", sum_end - fill_end);
 	return 0;
