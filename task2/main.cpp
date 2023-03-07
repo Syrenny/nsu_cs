@@ -1,6 +1,6 @@
 #include <cstdlib>
 #include <cmath>
-#include <string>
+#include <cstring>
 #include <iostream>
 
 double corners[4] = { 10, 20, 30, 20 };
@@ -24,7 +24,7 @@ int main(int argc, char** argv)
             min_error = std::stod(argv[i + 1]);
         }
     }
-
+    std::cout << "Size = " << size << std::endl;
     auto* A = new double[size * size];
     auto* A_new = new double[size * size];
 
