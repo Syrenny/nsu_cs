@@ -2,6 +2,23 @@
 #include <cmath>
 #include <cstring>
 #include <iostream>
+#include <sys/time.h>
+
+struct timeval tv1, tv2, dtv;
+struct timezone tz;
+void time_start(){ gettimeofday(&tv1, &tz); }
+long time_stop()
+{
+	gettimeofday(&tv2, &tz);
+	dtv.tv_sec = tv2.tv_sec - tv1.tv_sec;
+	dtv.tv_usec = tv2.tv_usec - tv1.tv_usec;
+	if(dtv.tv_usec < 0)
+	{
+		dtv.tv_sec--;
+		dtv.tv_usec += 1000000;
+	}
+	return dtv.tv_sec * 1000 + dtv.tv_usec / 1000;
+}
 
 double corners[4] = { 10, 20, 30, 20 };
 
@@ -38,7 +55,6 @@ int main(int argc, char** argv)
     int full_size = size * size;
     double step = (corners[1] - corners[0]) / (size - 1);
 
-    clock_t start = clock();
 #pragma acc enter data copyin(A[0:full_size]) create(A_new[0:full_size])
     {
 #pragma acc parallel loop seq gang num_gangs(size) vector vector_length(size)
@@ -55,14 +71,16 @@ int main(int argc, char** argv)
 
     double error = 1.0;
     int iter = 0;
-    start = clock();
+    time_start();
 
 #pragma acc enter data copyin(A_new[0:full_size], A[0:full_size], error, iter, min_error, max_iter)
     while (error > min_error && iter < max_iter) 
     {
         iter++;
-        error = 0.0;
-#pragma acc data present(A, A_new, error)
+	error = 0.0;
+
+#pragma acc update device(error)
+#pragma acc data present(A, A_new)
 #pragma acc parallel loop independent collapse(2) vector vector_length(300) gang num_gangs(300) reduction(max:error) async(1)
         for (int i = 1; i < size - 1; i++)
         {
@@ -76,14 +94,8 @@ int main(int argc, char** argv)
         A = A_new;
         A_new = temp;
     }
-
-    double end = clock();
-    double elapsed_secs = double(end - start) / CLOCKS_PER_SEC;
-
-    std::cout << "Computation time: " << elapsed_secs << std::endl;
-
-#pragma acc data copyout(A[0:full_size], A_new[0:full_size])
-#pragma acc update host(A[0:size * size], A_new[0:size * size], error)
+#pragma acc update host(error)
+    std::cout << "Computation time(ms): " << time_stop() << std::endl;
     std::cout << "Error: " << error << std::endl;
     std::cout << "Iteration: " << iter << std::endl;
     delete[]A;
