@@ -77,11 +77,14 @@ int main(int argc, char** argv)
     while (error > min_error && iter < max_iter) 
     {
         iter++;
+#pragma kernels
+	    {
 	error = 0.0;
+	    }
 
 #pragma acc update device(error)
 #pragma acc data present(A, A_new)
-#pragma acc parallel loop independent collapse(2) vector vector_length(300) gang num_gangs(300) reduction(max:error) async(1)
+#pragma acc parallel loop vector vector_length(300) gang num_gangs(300) reduction(max:error) async(1)
         for (int i = 1; i < size - 1; i++)
         {
             for (int j = 1; j < size - 1; j++)
