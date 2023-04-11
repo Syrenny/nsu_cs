@@ -1,0 +1,41 @@
+GPU computations
+Size = 512
+Computation time(s): 0.033888
+Error: 0.107043
+Iteration: 100
+
+Size = 128
+Computation time(s): 0.338625
+Error: 9.92056e-07
+Iteration: 30100
+
+Size = 256
+Computation time(s): 1.16018
+Error: 9.98793e-07
+Iteration: 102900
+
+Size = 512
+Computation time(s): 4.2498
+Error: 9.99965e-07
+Iteration: 339600
+
+Size = 1024
+Computation time(s): 36.615
+Error: 1.36929e-06
+Iteration: 1000000
+
+Size = 128
+Computation time(s): 0.035001
+Error: 0.211314
+Iteration: 50
+
+Generating '/tmp/nsys-report-f0a5.qdstrm'
+[1/1] [0%                          ] gpu_128.nsys-rep[1/1] [0%                          ] gpu_128.nsys-rep[1/1] [13%                         ] gpu_128.nsys-rep[1/1] [====26%                     ] gpu_128.nsys-rep[1/1] [8%                          ] gpu_128.nsys-rep[1/1] [==20%                       ] gpu_128.nsys-rep[1/1] [=====32%                    ] gpu_128.nsys-rep[1/1] [====================85%     ] gpu_128.nsys-rep[1/1] [========================100%] gpu_128.nsys-rep[1/1] [========================100%] gpu_128.nsys-rep
+Generated:
+    /home/i.syrennyj/nsu_cs/task3/gpu_128.nsys-rep
+Size = 256
+Computation time(s): 0.034671
+Error: 0.213606
+Iteration: 50
+
+Generating '/tmp/nsys-report-522e.qdstrm'
