@@ -5,7 +5,7 @@
 
 #include <cuda_runtime.h>
 #include <cub/cub.cuh>
-
+// Период вычисления ошибки
 #define ERROR_COMPUTATION_STEP 100
 
 
@@ -23,7 +23,7 @@ void calculate_new_matrix(double* A, double* A_new, size_t size)
 	}
 }
 
-// Функция, подсчитывающая разницу матриц
+// Функция рассчета матрицы ошибок
 __global__
 void calculate_device_error_matrix(double* A, double* A_new, double* output_matrix)
 {
@@ -34,7 +34,7 @@ void calculate_device_error_matrix(double* A, double* A_new, double* output_matr
 		output_matrix[idx] = std::abs(A_new[idx] - A[idx]);
 	}
 }
-
+// Функция для вывода содержимого матрицы 
 void print_matrix(double* mx, int n, int m)
 {
     for(int i=0; i<m; i++)
@@ -107,13 +107,13 @@ int main(int argc, char** argv)
 	cudaError_t cuda_status_2 = cudaMalloc(&device_A_new, sizeof(double) * full_size);
 	cudaError_t cuda_status_3 = cudaMalloc(&device_error, sizeof(double));
 	cudaError_t cuda_status_4 = cuda_status_1 = cudaMalloc(&device_error_matrix, sizeof(double) * full_size);
-	
+	// Проверка статуса выполнения функций 
 	if (cuda_status_1 || cuda_status_2 || cuda_status_3 || cuda_status_4 != cudaSuccess)
 	{
 		std::cout << "Memory allocation error" << std::endl;
 		return -1;
 	}
-
+	// Копируем области памяти из хоста на устройство
 	cuda_status_1 = cudaMemcpy(device_A, A, sizeof(double) * full_size, cudaMemcpyHostToDevice);
 	cuda_status_2 = cudaMemcpy(device_A_new, A_new, sizeof(double) * full_size, cudaMemcpyHostToDevice);
 
@@ -136,20 +136,25 @@ int main(int argc, char** argv)
 	int iter = 0; 
 	double error = 1.0;
 
-	// Главный алгоритм 
+	// Главный цикл
 	clock_t start = clock();
 	while(iter < max_iter && error > min_error)
 	{
         iter++;
 		// Расчет матрицы
+		//<<<количество блоков, количество нитей в блоке>>>
         calculate_new_matrix<<<size - 1, size - 1>>>(device_A, device_A_new, size);
-		// Расчитываем ошибку каждую сотую итерацию
+		// Расчитываем ошибку с заданным периодом
 		if(iter % ERROR_COMPUTATION_STEP == 0)
 		{
+			// Подсчитываем матрицу ошибок 
 			calculate_device_error_matrix<<<size - 1, size - 1>>>(device_A, device_A_new, device_error_matrix);
+			// Находим максимальное значение ошибки
 			cub::DeviceReduce::Max(temp_stor, temp_stor_size, device_error_matrix, device_error, full_size);
+			// Отправка данных обратно на хост
             cudaMemcpy(&error, device_error, sizeof(double), cudaMemcpyDeviceToHost);
   		}
+	// Обмен указателей
         std::swap(device_A, device_A_new);
 	}
 
