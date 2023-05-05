@@ -1,0 +1,57 @@
+GPU computations
+Size = 128
+Computation time(s): 0.082347
+Error: 9.92056e-07
+Iteration: 30100
+
+Size = 256
+Computation time(s): 0.301305
+Error: 9.98793e-07
+Iteration: 102900
+
+Size = 512
+Computation time(s): 1.61071
+Error: 9.99965e-07
+Iteration: 339600
+
+Size = 1024
+Computation time(s): 25.0842
+Error: 1.36929e-06
+Iteration: 1000000
+
+Size = 128
+Computation time(s): 0.000246
+Error: 1
+Iteration: 50
+
+Generating '/tmp/nsys-report-24d6.qdstrm'
+[1/1] [0%                          ] gpu_128.nsys-rep[1/1] [0%                          ] gpu_128.nsys-rep[1/1] [===========50%              ] gpu_128.nsys-rep[1/1] [=======================96%  ] gpu_128.nsys-rep[1/1] [========================97% ] gpu_128.nsys-rep[1/1] [========================100%] gpu_128.nsys-rep[1/1] [========================100%] gpu_128.nsys-rep
+Generated:
+    /home/i.syrennyj/nsu_cs/task4/gpu_128.nsys-rep
+Size = 256
+Computation time(s): 0.000273
+Error: 1
+Iteration: 50
+
+Generating '/tmp/nsys-report-0430.qdstrm'
+[1/1] [0%                          ] gpu_256.nsys-rep[1/1] [0%                          ] gpu_256.nsys-rep[1/1] [=====32%                    ] gpu_256.nsys-rep[1/1] [=============60%            ] gpu_256.nsys-rep[1/1] [===================79%      ] gpu_256.nsys-rep[1/1] [========================97% ] gpu_256.nsys-rep[1/1] [========================100%] gpu_256.nsys-rep[1/1] [========================100%] gpu_256.nsys-rep
+Generated:
+    /home/i.syrennyj/nsu_cs/task4/gpu_256.nsys-rep
+Size = 512
+Computation time(s): 0.000245
+Error: 1
+Iteration: 50
+
+Generating '/tmp/nsys-report-ee7d.qdstrm'
+[1/1] [0%                          ] gpu_512.nsys-rep[1/1] [0%                          ] gpu_512.nsys-rep[1/1] [=====32%                    ] gpu_512.nsys-rep[1/1] [=============60%            ] gpu_512.nsys-rep[1/1] [===================79%      ] gpu_512.nsys-rep[1/1] [========================97% ] gpu_512.nsys-rep[1/1] [========================100%] gpu_512.nsys-rep[1/1] [========================100%] gpu_512.nsys-rep
+Generated:
+    /home/i.syrennyj/nsu_cs/task4/gpu_512.nsys-rep
+Size = 1024
+Computation time(s): 0.000232
+Error: 1
+Iteration: 50
+
+Generating '/tmp/nsys-report-0a06.qdstrm'
+[1/1] [0%                          ] gpu_1024.nsys-rep[1/1] [0%                          ] gpu_1024.nsys-rep[1/1] [=====31%                    ] gpu_1024.nsys-rep[1/1] [=============58%            ] gpu_1024.nsys-rep[1/1] [==================77%       ] gpu_1024.nsys-rep[1/1] [========================97% ] gpu_1024.nsys-rep[1/1] [========================100%] gpu_1024.nsys-rep[1/1] [========================100%] gpu_1024.nsys-rep
+Generated:
+    /home/i.syrennyj/nsu_cs/task4/gpu_1024.nsys-rep
