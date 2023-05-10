@@ -10,13 +10,12 @@
 
 
 // Главная функция - расчёт поля 
-__global__
-void calculate_new_matrix(double* A, double* A_new, size_t size)
+__global__ void calculate_new_matrix(double* A, double* A_new, size_t size)
 {
 	size_t i = blockIdx.x;
 	size_t j = threadIdx.x;
-	
-	if(!(blockIdx.x == 0 || threadIdx.x == 0))
+	// Проверка, чтобы не выходить за границы массива и не пересчитывать граничные условия	
+	if(!(blockIdx.x == 0 || threadIdx.x == 0 || blockIdx.x > size - 1 || threadIdx.x > size - 1))
 	{
 		A_new[i * size + j] = 0.25 * (A[i * size + j - 1] + A[(i - 1) * size + j] +
 							A[(i + 1) * size + j] + A[i * size + j + 1]);		
@@ -24,12 +23,11 @@ void calculate_new_matrix(double* A, double* A_new, size_t size)
 }
 
 // Функция рассчета матрицы ошибок
-__global__
-void calculate_device_error_matrix(double* A, double* A_new, double* output_matrix)
+__global__ void calculate_device_error_matrix(double* A, double* A_new, double* output_matrix, size_t size)
 {
 	size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
-
-	if(!(blockIdx.x == 0 || threadIdx.x == 0))
+	// Проверка, чтобы не выходить за границы массива и не пересчитывать граничные условия
+	if(!(blockIdx.x == 0 || threadIdx.x == 0 || blockIdx.x > size - 1 || threadIdx.x > size - 1))
 	{
 		output_matrix[idx] = std::abs(A_new[idx] - A[idx]);
 	}
@@ -59,14 +57,27 @@ int main(int argc, char** argv)
         if (std::string(argv[i]).find("-size") != std::string::npos)
         {
             size = std::atoi(argv[i + 1]);
+		if(size < 0)
+		{
+			std::cout << "Invalid -size parameter" << std::endl;
+			return -1;
+		}
         }
         else if (std::string(argv[i]).find("-max_iter") != std::string::npos)
         {
             max_iter = std::atoi(argv[i + 1]);
+		if(max_iter < 0)
+		{
+			std::cout << "Invalid -max_iter parameter" << std::endl;
+		}
         }
         else if (std::string(argv[i]).find("-min_error") != std::string::npos)
         {
             min_error = std::stod(argv[i + 1]);
+		if(min_error <= 0)
+		{
+			std::cout << "Invalid -min_error parameter" << std::endl;
+		}
         }
     }
     std::cout << "Size = " << size << std::endl;
@@ -103,36 +114,92 @@ int main(int argc, char** argv)
 	double* device_A, *device_A_new, *device_error, *device_error_matrix, *temp_stor = NULL;
 	size_t temp_stor_size = 0;
 
-	cudaError_t cuda_status_1 = cudaMalloc(&device_A, sizeof(double) * full_size);
-	cudaError_t cuda_status_2 = cudaMalloc(&device_A_new, sizeof(double) * full_size);
-	cudaError_t cuda_status_3 = cudaMalloc(&device_error, sizeof(double));
-	cudaError_t cuda_status_4 = cuda_status_1 = cudaMalloc(&device_error_matrix, sizeof(double) * full_size);
-	// Проверка статуса выполнения функций 
-	if (cuda_status_1 || cuda_status_2 || cuda_status_3 || cuda_status_4 != cudaSuccess)
+	cudaError_t cuda_status = cudaMalloc(&device_A, sizeof(double) * full_size);
+	if(cuda_status != cudaSuccess)
 	{
-		std::cout << "Memory allocation error" << std::endl;
+		std::cout << "device_A allocation error" << std::endl;
+		delete[]A;
+		delete[]A_new;
 		return -1;
 	}
+	
+	cuda_status = cudaMalloc(&device_A_new, sizeof(double) * full_size);
+	if(cuda_status != cudaSuccess)
+	{
+		std::cout << "device_A_new allocation error" << std::endl;
+		cudaFree(device_a);
+		delete[]A;
+		delete[]A_new;
+		return -1;
+	}
+	
+	cuda_status = cudaMalloc(&device_error, sizeof(double));
+	if(cuda_status != cudaSuccess)
+	{
+		std::cout << "device_error allocation error" << std::endl;
+		cudaFree(device_A);
+		cudaFree(device_A_new);
+		delete[]A;
+		delete[]A_new;		
+		return -1;
+	}
+	
+	cuda_status = cudaMalloc(&device_error_matrix, sizeof(double) * full_size);
+	if(cuda_status != cudaSuccess)
+	{
+		std::cout << "device_error_matrix allocation error" << std::endl;
+		cudaFree(device_A);
+		cudaFree(device_A_new);
+		cudaFree(device_error);
+		delete[]A;
+		delete[]A_new;		
+		return -1;
+	}
+	
 	// Копируем области памяти из хоста на устройство
-	cuda_status_1 = cudaMemcpy(device_A, A, sizeof(double) * full_size, cudaMemcpyHostToDevice);
-	cuda_status_2 = cudaMemcpy(device_A_new, A_new, sizeof(double) * full_size, cudaMemcpyHostToDevice);
-
-	if (cuda_status_1 || cuda_status_2 != cudaSuccess)
+	cuda_status = cudaMemcpy(device_A, A, sizeof(double) * full_size, cudaMemcpyHostToDevice);
+	if(cuda_status != cudaSuccess)
 	{
-		std::cout << "Memory transfering error" << std::endl;
+		std::cout << "device_A copying error";
+		cudaFree(device_A);
+		cudaFree(device_A_new);
+		cudaFree(device_error);
+		cudaFree(device_error_matrix
+		delete[]A;
+		delete[]A_new;		
 		return -1;
 	}
+	
+	cuda_status = cudaMemcpy(device_A_new, A_new, sizeof(double) * full_size, cudaMemcpyHostToDevice);
+	if(cuda_status != cudaSuccess)
+			 {
+				std::cout << "device_A_new copying error";
+				cudaFree(device_A);
+				cudaFree(device_A_new);
+				cudaFree(device_error);
+				cudaFree(device_error_matrix);
+				delete[]A;
+				delete[]A_new;		
+				return -1;	 
+			 }
+			 
 
-	// Получаем размер временного буфера для редукции
+	// temp_stor = NULL, функция возврашает количество байтов для временного хранилища
 	cub::DeviceReduce::Max(temp_stor, temp_stor_size, device_error_matrix, device_error, full_size);
 	
 	// Выделяем память для буфера
-	cuda_status_1 = cudaMalloc(&temp_stor, temp_stor_size);
-    if (cuda_status_1 != cudaSuccess)
-    {
-        std::cout << "Temporary storage allocation error " << std::endl;
-        return -1;
-    }
+	cuda_status = cudaMalloc(&temp_stor, temp_stor_size);
+   if(cuda_status != cudaSuccess)
+			 {
+				std::cout << "device_A_new copying error";
+				cudaFree(device_A);
+				cudaFree(device_A_new);
+				cudaFree(device_error);
+				cudaFree(device_error_matrix);
+				delete[]A;
+				delete[]A_new;		
+				return -1;	 
+			 }
 	int iter = 0; 
 	double error = 1.0;
 
@@ -143,12 +210,12 @@ int main(int argc, char** argv)
         iter++;
 		// Расчет матрицы
 		//<<<количество блоков, количество нитей в блоке>>>
-        calculate_new_matrix<<<size - 1, size - 1>>>(device_A, device_A_new, size);
+        calculate_new_matrix<<<size, size>>>(device_A, device_A_new, size);
 		// Расчитываем ошибку с заданным периодом
 		if(iter % ERROR_COMPUTATION_STEP == 0)
 		{
 			// Подсчитываем матрицу ошибок 
-			calculate_device_error_matrix<<<size - 1, size - 1>>>(device_A, device_A_new, device_error_matrix);
+			calculate_device_error_matrix<<<size, size>>>(device_A, device_A_new, device_error_matrix, size);
 			// Находим максимальное значение ошибки
 			cub::DeviceReduce::Max(temp_stor, temp_stor_size, device_error_matrix, device_error, full_size);
 			// Отправка данных обратно на хост
@@ -170,5 +237,7 @@ int main(int argc, char** argv)
 	cudaFree(temp_stor);
 	cudaFree(A);
 	cudaFree(A_new);
+	delete[]A;
+	delete[]A_new;
 	return 0;
 }
