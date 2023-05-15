@@ -7,6 +7,7 @@
 #include <cuda_runtime.h>
 #include <cub/cub.cuh>
 // Период вычисления ошибки
+#define MAX_THREADS 1024
 #define ERROR_COMPUTATION_STEP 100
 
 #define CUDA_DEBUG
@@ -30,12 +31,9 @@ exit(-1);	\
 // Главная функция - расчёт поля 
 __global__ void calculate_new_matrix(double* A, double* A_new, size_t size)
 {
-	// size_t i = blockIdx.x;
-	// size_t j = threadIdx.x;
-	unsigned int j = blockIdx.x * blockDim.x + threadIdx.x;
-    unsigned int i = blockIdx.y * blockDim.y + threadIdx.y;
+    unsigned int i = blockIdx.x;
+	unsigned int j = threadIdx.x;
 
-	if (i * size + j > size * size) return;
 	// Проверка, чтобы не выходить за границы массива и не пересчитывать граничные условия	
 	if(!(i == 0 || j == 0 || i >= size - 1 || j >= size - 1))
 	{
@@ -46,10 +44,11 @@ __global__ void calculate_new_matrix(double* A, double* A_new, size_t size)
 
 __global__ void calculate_device_error_matrix(double* A, double* A_new, double* output_matrix, size_t size)
 {
-	unsigned int j = blockIdx.x * blockDim.x + threadIdx.x;
-    unsigned int i = blockIdx.y * blockDim.y + threadIdx.y;
+	unsigned int i = blockIdx.x;
+    unsigned int j = threadIdx.x;
 
 	size_t idx = i * size + j;
+	// Проверка, чтобы не выходить за границы массива и не пересчитывать граничные условия	
 	if(!(j == 0 || i == 0 || j >= size - 1 || i >= size - 1))
 	{
 		output_matrix[idx] = std::abs(A_new[idx] - A[idx]);
@@ -123,7 +122,7 @@ int main(int argc, char** argv)
         }
     }
     std::cout << "Size = " << size << std::endl;
-    // Выделение памяти на хосте
+    // Выделение места сразу в pinned памяти 
 	size_t full_size = size * size;
 	CUDA_CHECK_ERROR(cudaMallocHost(&A_new, full_size * sizeof(double)));
 	CUDA_CHECK_ERROR(cudaMallocHost(&A, full_size * sizeof(double)));
@@ -152,6 +151,7 @@ int main(int argc, char** argv)
 	cudaSetDevice(0);
 
 	// Выделяем память на девайсе и копируем память с хоста на устройство
+	// Ошибки обрабатываются в макросе, в случае чего освобождается память
 	size_t temp_stor_size = 0;
 	CUDA_CHECK_ERROR(cudaMalloc(&device_A, sizeof(double) * full_size));
 	CUDA_CHECK_ERROR(cudaMalloc(&device_A_new, sizeof(double) * full_size));
@@ -171,19 +171,15 @@ int main(int argc, char** argv)
 	Количество нитей ограничено 1024, поэтому устанавливаю значение <= 1024,
 	а затем вычисляю необходимое количество блоков
 	*/
-	size_t threads = (size < 1024) ? size : 1024;
-    unsigned int blocks = size / threads;
+	size_t threads = (size < MAX_THREADS) ? size : MAX_THREADS;
+    unsigned int blocks = full_size / threads;
 	/*
 	dim3 - специальный тип на основе uint3 для задания размерности, 
 	имеет удобный конструктор, который инициализирует незаданные компоненты 1.
-	Далее инициализирую двумерные векторы blockDim и gridDim. 
-	Т.к. ограничение по количеству нитей в блоке 1024, а вектор двумерный, 
-	делю на 32 (32^2=1024), можно выбрать число и больше 32, но в таком случае 
-	блоки будут использоваться неэффективно. Путем тривиальных вычислений получается, что 
-	компоненты gridDim нужно умножать на то же число.
+	Далее инициализирую одномерные векторы blockDim и gridDim.
 	*/
-	dim3 blockDim(threads / 32, threads / 32);
-    dim3 gridDim(blocks * 32, blocks * 32);
+	dim3 blockDim(threads);
+    dim3 gridDim(blocks);
 	// Главный цикл
 	clock_t start = clock();
 	nvtxRangePushA("Main loop");
@@ -192,6 +188,7 @@ int main(int argc, char** argv)
         iter += 2;
 		// Расчет матрицы
 		//<<<размерность сетки, размерность блоков>>>
+		// Функция вызывается дважды за итерацию, таким образом избавился от std::swap
         calculate_new_matrix<<<gridDim, blockDim>>>(device_A, device_A_new, size);
 		calculate_new_matrix<<<gridDim, blockDim>>>(device_A_new, device_A, size);
 		// Расчитываем ошибку с заданным периодом
@@ -204,8 +201,6 @@ int main(int argc, char** argv)
 			// Отправка данных обратно на хост
             cudaMemcpy(&error, device_error, sizeof(double), cudaMemcpyDeviceToHost);
   		}
-	// Обмен указателей
-        //std::swap(device_A, device_A_new);
 	}
     nvtxRangePop();
 	clock_t end = clock();
