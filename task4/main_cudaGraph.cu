@@ -174,12 +174,21 @@ int main(int argc, char** argv)
 	bool is_graph_inited = false;
 	cudaStream_t stream;
 	cudaStreamCreate(&stream);
+	// Cодержит информацию, определяющую структуру и содержание графа
 	cudaGraph_t graph;
+	// «Исполняемый граф», представление графа в форме, которая может быть запущена и выполнена аналогично одному ядру
 	cudaGraphExec_t instance;
-
+	/*
+	Количество нитей ограничено 1024, поэтому устанавливаю значение <= 1024,
+	а затем вычисляю необходимое количество блоков
+	*/
 	size_t threads = (size < MAX_THREADS) ? size : MAX_THREADS;
     unsigned int blocks = full_size / threads;
-
+	/*
+	dim3 - специальный тип на основе uint3 для задания размерности, 
+	имеет удобный конструктор, который инициализирует незаданные компоненты 1.
+	Далее инициализирую одномерные векторы blockDim и gridDim.
+	*/
 	dim3 blockDim(threads);
     dim3 gridDim(blocks);
 
@@ -191,22 +200,33 @@ int main(int argc, char** argv)
 		// Расчет матрицы
 		if (is_graph_inited)
 		{
+			// Запускаем выполнение графа
 			cudaGraphLaunch(instance, stream);
+			// Копируем значение ошибки обратно на хост 
 			cudaMemcpy(error, device_error, sizeof(double), cudaMemcpyDeviceToHost);
 			iter += ERROR_COMPUTATION_STEP;
 		}
 		else
 		{
+			// Начало сбора информации о действиях графического процессора, которые отправляются в поток
 			cudaStreamBeginCapture(stream, cudaStreamCaptureModeGlobal);
+			// 100 раз вычисляем сетку
 			for(size_t i = 0; i < ERROR_COMPUTATION_STEP / 2; i++)
 			{
+				/*
+				Расчет матрицы
+				<<<размерность сетки, размерность блоков, дополнительный объем shared-памяти, Cuda stream>>>
+				Функция вызывается дважды за итерацию, поэтому ERROR_COMPUTATION_STEP / 2
+				*/
 				calculate_new_matrix<<<gridDim, blockDim, 0, stream>>>(device_A, device_A_new, size);
 				calculate_new_matrix<<<gridDim, blockDim, 0, stream>>>(device_A_new, device_A, size);
 			}
+			// Вычисляем матрицу ошибок
 			calculate_device_error_matrix<<<gridDim, blockDim, 0, stream>>>(device_A, device_A_new, device_error_matrix, size);
 			cub::DeviceReduce::Max(temp_stor, temp_stor_size, device_error_matrix, device_error, full_size, stream);
-	
+			// Конец захвата информации из потока
 			cudaStreamEndCapture(stream, &graph);
+			// Создает и предварительно инициализирует ядра, чтобы потом их можно было запускать как можно быстрее
 			cudaGraphInstantiate(&instance, graph, NULL, NULL, 0);
 			is_graph_inited = true;
   		}
