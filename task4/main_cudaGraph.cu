@@ -7,6 +7,7 @@
 #include <cuda_runtime.h>
 #include <cub/cub.cuh>
 // Период вычисления ошибки
+#define MAX_THREADS 1024
 #define ERROR_COMPUTATION_STEP 100
 
 #define CUDA_DEBUG
@@ -31,10 +32,9 @@ exit(-1);	\
 // Главная функция - расчёт поля 
 __global__ void calculate_new_matrix(double* A, double* A_new, size_t size)
 {
-	unsigned int j = blockIdx.x * blockDim.x + threadIdx.x;
-    unsigned int i = blockIdx.y * blockDim.y + threadIdx.y;
+    unsigned int i = blockIdx.x;
+	unsigned int j = threadIdx.x;
 
-	if (i * size + j > size * size) return;
 	// Проверка, чтобы не выходить за границы массива и не пересчитывать граничные условия	
 	if(!(i == 0 || j == 0 || i >= size - 1 || j >= size - 1))
 	{
@@ -46,11 +46,12 @@ __global__ void calculate_new_matrix(double* A, double* A_new, size_t size)
 // Функция рассчета матрицы ошибок
 __global__ void calculate_device_error_matrix(double* A, double* A_new, double* output_matrix, size_t size)
 {
-	unsigned int j = blockIdx.x * blockDim.x + threadIdx.x;
-    unsigned int i = blockIdx.y * blockDim.y + threadIdx.y;
+	unsigned int i = blockIdx.x;
+    unsigned int j = threadIdx.x;
 
 	size_t idx = i * size + j;
-	if(!(j == 0 || i == 0 || j == size - 1))
+	// Проверка, чтобы не выходить за границы массива и не пересчитывать граничные условия	
+	if(!(j == 0 || i == 0 || j >= size - 1 || i >= size - 1))
 	{
 		output_matrix[idx] = std::abs(A_new[idx] - A[idx]);
 	}
@@ -176,11 +177,11 @@ int main(int argc, char** argv)
 	cudaGraph_t graph;
 	cudaGraphExec_t instance;
 
-	size_t threads = (size < 1024) ? size : 1024;
-    unsigned int blocks = size / threads;
+	size_t threads = (size < MAX_THREADS) ? size : MAX_THREADS;
+    unsigned int blocks = full_size / threads;
 
-	dim3 blockDim(threads / 32, threads / 32);
-    dim3 gridDim(blocks * 32, blocks * 32);
+	dim3 blockDim(threads);
+    dim3 gridDim(blocks);
 
 	// Главный алгоритм 
 	clock_t start = clock();
@@ -191,10 +192,7 @@ int main(int argc, char** argv)
 		if (is_graph_inited)
 		{
 			cudaGraphLaunch(instance, stream);
-			
-			cudaMemcpyAsync(error, device_error, sizeof(double), cudaMemcpyDeviceToHost, stream);
-			cudaStreamSynchronize(stream);
-
+			cudaMemcpy(error, device_error, sizeof(double), cudaMemcpyDeviceToHost);
 			iter += ERROR_COMPUTATION_STEP;
 		}
 		else
@@ -205,7 +203,6 @@ int main(int argc, char** argv)
 				calculate_new_matrix<<<gridDim, blockDim, 0, stream>>>(device_A, device_A_new, size);
 				calculate_new_matrix<<<gridDim, blockDim, 0, stream>>>(device_A_new, device_A, size);
 			}
-			// Расчитываем ошибку каждую сотую итерацию
 			calculate_device_error_matrix<<<gridDim, blockDim, 0, stream>>>(device_A, device_A_new, device_error_matrix, size);
 			cub::DeviceReduce::Max(temp_stor, temp_stor_size, device_error_matrix, device_error, full_size, stream);
 	
