@@ -160,7 +160,7 @@ int main(int argc, char** argv)
                     CUBLAS_CHECK_ERROR(cublasIdamax(handle, full_size, A, 1, &idmax));
                 }
                 // Передача необходимой ячейки из матрицы ошибок обратно на host
-#pragma acc update host(A[idmax - 1])
+#pragma acc update host(A[(idmax - 1):1])
                 error = std::abs(A[idmax - 1]);
                 // Восстановление граничных условий 
 #pragma acc host_data use_device(A, A_new)
