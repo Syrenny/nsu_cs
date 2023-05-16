@@ -148,8 +148,9 @@ int main(int argc, char** argv)
             if(iter % 100 == 0)
             {
                 /*
-                host_data: использовать память хоста 
-                use_device: производить вычисления на GPU
+                host_data use_device(A, A_new): используется, когда надо получить указатель на область памяти на
+                устройстве для дальнейшего использования с кодом на хосте. Нужна, чтобы передать в функции cuBLAS, 
+                которые запускаются с хоста 
                 */
 #pragma acc host_data use_device(A, A_new)
                 {
@@ -161,7 +162,7 @@ int main(int argc, char** argv)
                 // Передача необходимой ячейки из матрицы ошибок обратно на host
 #pragma acc update host(A[idmax - 1])
                 error = std::abs(A[idmax - 1]);
-                // Восстановление матрицы A на устройстве
+                // Восстановление граничных условий 
 #pragma acc host_data use_device(A, A_new)
                 CUBLAS_CHECK_ERROR(cublasDcopy(handle, full_size, A_new, 1, A, 1));
             }
