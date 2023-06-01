@@ -6,6 +6,13 @@
 #include <cuda_runtime.h>
 #include <cub/cub.cuh>
 #include <mpi.h>
+#include <vector>
+
+
+#define CORNER1 10
+#define CORNER2 20
+#define CORNER3 30
+#define CORNER4 20
 
 
 #define CALCULATE(A, A_new, size, i, j) \
@@ -14,15 +21,14 @@
 
 __global__ void calculate_boundaries(double* A, double* A_new, size_t size, size_t size_per_gpu)
 {
-	unsigned int idxUp = blockIdx.x * blockDim.x + threadIdx.x;
-	unsigned int idxDown = blockIdx.x * blockDim.x + threadIdx.x;
+	unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
 
-	if (idxUp == 0 || idxUp > size - 2) return;
+	if (idx == 0 || idx > size - 2) return;
 	
-	if(idxUp < size)
+	if(idx < size)
 	{
-		CALCULATE(A, A_new, size, 1, idxUp);
-		CALCULATE(A, A_new, size, (size_per_gpu - 2), idxDown);
+		CALCULATE(A, A_new, size, 1, idx);
+		CALCULATE(A, A_new, size, (size_per_gpu - 2), idx);
 	}
 }
 
@@ -50,6 +56,17 @@ __global__ void get_error_matrix(double* A, double* A_new, double* outputMatrix,
 		outputMatrix[idx] = std::abs(A_new[idx] - A[idx]);
 	}
 }
+
+int sum_up_to(std::vector<int> src, int n)
+{
+	int result = 0;
+	for(int i = 0; i < n; i++)
+	{
+		result += src[i];
+	}
+	return result;
+}
+
 // Находим ближайшее число степени двойки
 int nearest_power_of_two(size_t num) {
     int power = 1;
@@ -59,14 +76,42 @@ int nearest_power_of_two(size_t num) {
     return power;
 }
 
-#define CORNER1 10
-#define CORNER2 20
-#define CORNER3 30
-#define CORNER4 20
+std::vector<int> get_process_area_size(int size, int size_of_group)
+{
+	std::vector<int> values;
+	for(int acc = size_of_group; acc > 0; acc--)
+	{
+		values.push_back(size / acc);
+		size -= values.back();
+	}
+	return values;
+}
+
+
+//функция для вывода матрицы 
+void print_matrix(double* mx, int n, int m, int start)
+{
+    for(int i=start; i<start+m; i++)
+    {
+        for(int j=0; j<n; j++)
+        {
+            std::cout << std::setw(10) << mx[n * i + j] << " ";
+        }
+        std::cout << std::endl;
+    }
+}
+
+void print_matrix_areas(double* mx, int rank, int size, std::vector<int> process_areas_sizes)
+{
+	std::cout << "Rank: " << rank << std::endl;
+	int start = sum_up_to(process_areas_sizes, rank);
+	print_matrix(mx, size, process_areas_sizes[rank + 1], start);
+}
+
 
 int main(int argc, char** argv)
 {
-    double 	*A,	*A_new, *device_matrix_A, *device_matrix_A_new, *device_error, *error_matrix, *temp_storage = nullptr;
+    double *A,	*A_new, *device_matrix_A, *device_matrix_A_new, *device_error, *error_matrix, *temp_storage = nullptr;
 
 	if (argc != 4)
 	{
@@ -104,8 +149,10 @@ int main(int argc, char** argv)
 	}
 
 	// Размечаем границы между устройствами
-	size_t one_process_area_size = size / size_of_group;
-	size_t startYIdx = one_process_area_size * rank;
+	std::vector<int> process_areas_sizes = get_process_area_size(size, size_of_group);
+	size_t one_process_area_size = process_areas_sizes[rank];
+	std::cout << "Rank / Rank size: " << rank << "\t" << one_process_area_size << std::endl; 
+	size_t startYIdx = sum_up_to(process_areas_sizes, rank);
 
 	// Выделение памяти на хосте
     cudaMallocHost(&A, sizeof(double) * full_size);
@@ -168,7 +215,7 @@ int main(int argc, char** argv)
 	cudaStreamCreate(&stream);
 	cudaStreamCreate(&matrix_calculation_stream);
 
-	unsigned int threads_x = std::min(nearest_power_of_two(size), 1024);
+	unsigned int threads_x = std::min(size, 1024);
     unsigned int blocks_y = one_process_area_size;
     unsigned int blocks_x = size / threads_x;
 
@@ -183,20 +230,22 @@ int main(int argc, char** argv)
 	while((iter < max_iter) && (*error) > min_error)
 	{
 		iter++;
-
-		// Расчитываем границы, которые потом будем отправлять другим процессам
-		calculate_boundaries<<<size, 1, 0, stream>>>(device_matrix_A, device_matrix_A_new, 
-										size, one_process_area_size);
-		cudaStreamSynchronize(stream);
-		// Расчет матрицы
-		calculate_new_matrix<<<gridDim, blockDim, 0, matrix_calculation_stream>>>
-							(device_matrix_A, device_matrix_A_new, size, one_process_area_size);
+		if(one_process_area_size > 2)
+		{
+			// Расчитываем границы, которые потом будем отправлять другим процессам
+			calculate_boundaries<<<size, 1, 0, stream>>>(device_matrix_A, device_matrix_A_new, 
+											size, one_process_area_size);
+			cudaStreamSynchronize(stream);
+			// Расчет матрицы
+			calculate_new_matrix<<<gridDim, blockDim, 0, matrix_calculation_stream>>>
+								(device_matrix_A, device_matrix_A_new, size, one_process_area_size);
+		}
 		// Расчитываем ошибку каждую сотую итерацию
 		if (iter % 100 == 0)
 		{
 			get_error_matrix<<<gridDim, blockDim, 0, matrix_calculation_stream>>>(device_matrix_A, device_matrix_A_new, error_matrix,
 															size, one_process_area_size);
-
+			
 			cub::DeviceReduce::Max(temp_storage, temp_storage_size, error_matrix, device_error, allocated_memory_size, matrix_calculation_stream);
 			
 			cudaStreamSynchronize(matrix_calculation_stream);
@@ -204,7 +253,7 @@ int main(int argc, char** argv)
 			// Находим максимальную ошибку среди всех и передаём её всем процессам
 			MPI_Allreduce((void*)device_error, (void*)device_error, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
 
-			cudaMemcpy(error, device_error, sizeof(double), cudaMemcpyDeviceToHost, matrix_calculation_stream);
+			cudaMemcpyAsync(error, device_error, sizeof(double), cudaMemcpyDeviceToHost, matrix_calculation_stream);
 		}
 		
 		// Обмен "граничными" условиями каждой области
@@ -226,13 +275,19 @@ int main(int argc, char** argv)
 		// Обмен указателей
 		std::swap(device_matrix_A, device_matrix_A_new);
 	}
-
 	clock_t end = clock();
 	if (rank == 0)
 	{
 		std::cout << "Time: " << 1.0 * (end - begin) / CLOCKS_PER_SEC << std::endl;
 		std::cout << "Iter: " << iter << " Error: " << *error << std::endl;
 	}
+
+	cudaError_t e =  cudaMemcpy(A, device_matrix_A, sizeof(double) * size * one_process_area_size, cudaMemcpyDeviceToHost);
+
+	std::cout << "eee" << e << "eee";
+	if(rank == 0)
+		print_matrix(A, size, size, 0);
+	//print_matrix_areas(A, rank, size, process_areas_sizes);
 
 	MPI_Finalize();
 
