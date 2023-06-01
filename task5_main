@@ -1,0 +1,239 @@
+#include <iostream>
+#include <cstring>
+#include <cmath>
+#include <ctime>
+#include <iomanip>
+#include <cuda_runtime.h>
+#include <cub/cub.cuh>
+#include <mpi.h>
+
+#define CALCULATE(A, A_new, size, i, j) \
+	A_new[i * size + j] = 0.25 * (A[i * size + j - 1] + A[(i - 1) * size + j] + \
+			A[(i + 1) * size + j] + A[i * size + j + 1]);	
+
+__global__ void calculate_boundaries(double* A, double* A_new, size_t size, size_t size_per_gpu)
+{
+	unsigned int idxUp = blockIdx.x * blockDim.x + threadIdx.x;
+	unsigned int idxDown = blockIdx.x * blockDim.x + threadIdx.x;
+
+	if (idxUp == 0 || idxUp > size - 2) return;
+	
+	if(idxUp < size)
+	{
+		CALCULATE(A, A_new, size, 1, idxUp);
+		CALCULATE(A, A_new, size, (size_per_gpu - 2), idxDown);
+	}
+}
+
+// Главная функция - расчёт поля 
+__global__ void calculate_new_matrix(double* A, double* A_new, size_t size, size_t size_per_gpu)
+{
+	unsigned int j = blockIdx.x * blockDim.x + threadIdx.x;
+    unsigned int i = blockIdx.y * blockDim.y + threadIdx.y;
+	
+	if(!(j < 1 || i < 2 || j > size - 2 || i > size_per_gpu - 2))
+	{
+		CALCULATE(A, A_new, size, i, j);
+	}
+}
+
+// Функция, подсчитывающая разницу матриц
+__global__ void get_error_matrix(double* A, double* A_new, double* outputMatrix, size_t size, size_t size_per_gpu)
+{
+	unsigned int j = blockIdx.x * blockDim.x + threadIdx.x;
+    unsigned int i = blockIdx.y * blockDim.y + threadIdx.y;
+
+	size_t idx = i * size + j;
+	if(!(j == 0 || i == 0 || j == size - 1 || i == size_per_gpu - 1))
+	{
+		outputMatrix[idx] = std::abs(A_new[idx] - A[idx]);
+	}
+}
+// Находим ближайшее число степени двойки
+int nearest_power_of_two(size_t num) {
+    int power = 1;
+    while (power < num) {
+        power <<= 1;
+    }
+    return power;
+}
+
+#define CORNER1 10
+#define CORNER2 20
+#define CORNER3 30
+#define CORNER4 20
+
+int main(int argc, char** argv)
+{
+    double 	*A,	*A_new, *device_matrix_A, *device_matrix_A_new, *device_error, *error_matrix, *temp_storage = nullptr;
+
+	if (argc != 4)
+	{
+		std::cout << "Invalid parameters" << std::endl;
+		std::exit(-1);
+	}
+
+	// Получаем значения из командной строки
+	const double min_error = std::pow(10, -std::stoi(argv[1]));
+	const int size = std::stoi(argv[2]);
+	const int max_iter = std::stoi(argv[3]);
+	const size_t full_size = size * size;
+
+	int rank, size_of_group;
+    MPI_Init(&argc, &argv);
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &size_of_group);
+
+	int num_devices = 0;
+	cudaGetDeviceCount(&num_devices);
+	if (size_of_group > num_devices || size_of_group < 1)
+	{
+		std::cout << "Invalid number of devices!";
+		std::exit(-1);
+	}
+
+	cudaSetDevice(rank);
+
+	if (rank == 0)
+	{
+		std::cout << "Parameters: " << std::endl <<
+		"Min error: " << min_error << std::endl <<
+		"Maximal number of iteration: " << max_iter << std::endl <<
+		"Grid size: " << size << std::endl;
+	}
+
+	// Размечаем границы между устройствами
+	size_t one_process_area_size = size / size_of_group;
+	size_t startYIdx = one_process_area_size * rank;
+
+	// Выделение памяти на хосте
+    cudaMallocHost(&A, sizeof(double) * full_size);
+    cudaMallocHost(&A_new, sizeof(double) * full_size);
+
+	std::memset(A, 0, size * size * sizeof(double));
+
+	// Заполнение граничных условий
+	A[0] = CORNER1;
+	A[size - 1] = CORNER2;
+	A[size * size - 1] = CORNER3;
+	A[size * (size - 1)] = CORNER4;
+
+	const double step = 1.0 * (CORNER2 - CORNER1) / (size - 1);
+	for (int i = 1; i < size - 1; i++)
+	{
+		A[i] = CORNER1 + i * step;
+		A[i * size] = CORNER1 + i * step;
+		A[size - 1 + i * size] = CORNER2 + i * step;
+		A[size * (size - 1) + i] = CORNER4 + i * step;
+	}
+
+	std::memcpy(A_new, A, full_size * sizeof(double));
+
+	// Расчитываем, сколько памяти требуется процессу
+	if (rank != 0 && rank != size_of_group - 1)
+	{
+		one_process_area_size += 2;
+	}
+	else 
+	{
+		one_process_area_size += 1;
+	}
+
+	size_t allocated_memory_size = size * one_process_area_size;
+
+	// Выделяем память на девайсе
+	cudaMalloc((void**)&device_matrix_A, allocated_memory_size * sizeof(double));
+	cudaMalloc((void**)&device_matrix_A_new, allocated_memory_size * sizeof(double));
+	cudaMalloc((void**)&error_matrix, allocated_memory_size * sizeof(double));
+	cudaMalloc((void**)&device_error, sizeof(double));
+
+	// Копируем часть заполненной матрицы в выделенную память, начиная с 1 строки
+	size_t offset = (rank != 0) ? size : 0;
+ 	cudaMemcpy(device_matrix_A, A + (startYIdx * size) - offset, 
+					sizeof(double) * allocated_memory_size, cudaMemcpyHostToDevice);
+	cudaMemcpy(device_matrix_A_new, A_new + (startYIdx * size) - offset, 
+					sizeof(double) * allocated_memory_size, cudaMemcpyHostToDevice);
+
+	// Здесь мы получаем размер временного буфера для редукции и выделяем память для этого буфера
+	size_t temp_storage_size = 0;
+	cub::DeviceReduce::Max(temp_storage, temp_storage_size, error_matrix, device_error, size * one_process_area_size);
+	cudaMalloc((void**)&temp_storage, temp_storage_size);
+
+	double* error;
+	cudaMallocHost(&error, sizeof(double));
+	*error = 1.0;
+
+	cudaStream_t stream, matrix_calculation_stream;
+	cudaStreamCreate(&stream);
+	cudaStreamCreate(&matrix_calculation_stream);
+
+	unsigned int threads_x = std::min(nearest_power_of_two(size), 1024);
+    unsigned int blocks_y = one_process_area_size;
+    unsigned int blocks_x = size / threads_x;
+
+    dim3 blockDim(threads_x, 1);
+    dim3 gridDim(blocks_x, blocks_y);
+
+
+	int iter = 0; 
+	
+	// Главный алгоритм 
+	clock_t begin = clock();
+	while((iter < max_iter) && (*error) > min_error)
+	{
+		iter++;
+
+		// Расчитываем границы, которые потом будем отправлять другим процессам
+		calculate_boundaries<<<size, 1, 0, stream>>>(device_matrix_A, device_matrix_A_new, 
+										size, one_process_area_size);
+		cudaStreamSynchronize(stream);
+		// Расчет матрицы
+		calculate_new_matrix<<<gridDim, blockDim, 0, matrix_calculation_stream>>>
+							(device_matrix_A, device_matrix_A_new, size, one_process_area_size);
+		// Расчитываем ошибку каждую сотую итерацию
+		if (iter % 100 == 0)
+		{
+			get_error_matrix<<<gridDim, blockDim, 0, matrix_calculation_stream>>>(device_matrix_A, device_matrix_A_new, error_matrix,
+															size, one_process_area_size);
+
+			cub::DeviceReduce::Max(temp_storage, temp_storage_size, error_matrix, device_error, allocated_memory_size, matrix_calculation_stream);
+			
+			cudaStreamSynchronize(matrix_calculation_stream);
+			
+			// Находим максимальную ошибку среди всех и передаём её всем процессам
+			MPI_Allreduce((void*)device_error, (void*)device_error, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
+
+			cudaMemcpy(error, device_error, sizeof(double), cudaMemcpyDeviceToHost, matrix_calculation_stream);
+		}
+		
+		// Обмен "граничными" условиями каждой области
+		// Обмен верхней границей
+		if (rank != 0)
+		{
+		    MPI_Sendrecv(device_matrix_A_new + size + 1, size - 2, MPI_DOUBLE, rank - 1, 0, 
+			device_matrix_A_new + 1, size - 2, MPI_DOUBLE, rank - 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+		}
+		// Обмен нижней границей
+		if (rank != size_of_group - 1)
+		{
+		    MPI_Sendrecv(device_matrix_A_new + (one_process_area_size - 2) * size + 1, size - 2, MPI_DOUBLE, rank + 1, 0,
+							device_matrix_A_new + (one_process_area_size - 1) * size + 1, 
+							size - 2, MPI_DOUBLE, rank + 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+		}
+	
+		cudaStreamSynchronize(matrix_calculation_stream);
+		// Обмен указателей
+		std::swap(device_matrix_A, device_matrix_A_new);
+	}
+
+	clock_t end = clock();
+	if (rank == 0)
+	{
+		std::cout << "Time: " << 1.0 * (end - begin) / CLOCKS_PER_SEC << std::endl;
+		std::cout << "Iter: " << iter << " Error: " << *error << std::endl;
+	}
+
+	MPI_Finalize();
+
+	return 0;
+}
